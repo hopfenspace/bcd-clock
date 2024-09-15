@@ -228,10 +228,7 @@ void loop() {
       lastCycleUpdate += 1000;
   }
   
-  uint32_t sleepDuration = (lastCycleUpdate + 1000) - millis();
-
-  Serial.print("delay for: ");
-  Serial.println(sleepDuration);
+  uint32_t sleepDuration = (lastCycleUpdate + 1000) - currTime;
   if(sleepDuration > 10) {
     delay(sleepDuration - 10);
   }
@@ -269,23 +266,6 @@ void setupNTP() {  // Fragt mit einer bereits offenen WLAN Verbindung das erste 
   seconds = timeClient.getSeconds();
   lastTimeUpdate = millis();
 }
-
-/*
-byte convertToBCD(int value) {
-  byte bcdVal = 0;
-
-  byte digit = 0;
-  byte shift = 0;
-  while (value > 0) {
-    digit = value % 10;
-    value /= 10;
-    bcdVal |= (digit << shift);
-    shift += 4;
-  }
-
-  return bcdVal;
-}
-*/
 
 byte bcd_time=0;
 void displayBCDClock(byte hour, byte minute, byte second) {
