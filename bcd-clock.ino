@@ -1,17 +1,16 @@
 #pragma region Includes
 #include <Adafruit_NeoPixel.h>
 #include <WiFiManager.h>
-#include <NTPClient.h>
-//#include <LibPrintf.h>
-
+#include <time.h>
 #pragma endregion Includes
 
 #pragma region Einstellungen und Pins
-//An welchem Pin ist es angeschlossen
+// An welchem Pin ist es angeschlossen
 #define SECONDPIN D3
-#define MINUTEPIN D4
+#define MINUTEPIN D7
 #define HOURPIN D8
 
+//#define ENABLE_SERIAL
 
 // How many NeoPixels are attached to the Arduino?
 #define PIXELCOUNTSECONDS 7
@@ -30,24 +29,14 @@
 // Setze hier ANIM auf 1-5, die Definitionen sind hier drunter (du kannst auch deine eigenen Animationen rein machen)
 #define ANIM 5
 
+#define MY_NTP_SERVER "de.pool.ntp.org"
+#define MY_TZ "CET-1CEST,M3.5.0,M10.5.0/3"
 #pragma endregion Einstellungen und Pins
 
 #pragma region Globale Variablen
-// Define NTP Client to get time
-WiFiUDP ntpUDP;
-NTPClient timeClient(ntpUDP, "pool.ntp.org");
-
-uint32_t currTime = 0;
-uint32_t lastTimeUpdate = 0;
-uint32_t lastCycleUpdate = 0;
-
 Adafruit_NeoPixel secondstripe(PIXELCOUNTSECONDS, SECONDPIN, NEO_RGB + NEO_KHZ800);
 Adafruit_NeoPixel minutestripe(PIXELCOUNTMINUTES, MINUTEPIN, NEO_RGB + NEO_KHZ800);
 Adafruit_NeoPixel hourstripe(PIXELCOUNTHOURS, HOURPIN, NEO_RGB + NEO_KHZ800);
-
-int hours = 0;
-int minutes = 0;
-int seconds = 0;
 #pragma endregion Globale Variablen
 
 #pragma region Definitionen der Boot-Animationen
@@ -169,82 +158,68 @@ int seconds = 0;
   #pragma endregion Implementierung Animationen
 #pragma endregion Definitionen der Boot-Animationen
 
+struct PersistentStorage {
+  uint16_t magic;
+  struct timeval tv;
+};
+
 void setup() {
-  pinMode(D1,OUTPUT); digitalWrite(D1,HIGH);
+#ifdef ENABLE_SERIAL
+  Serial.begin(9600);
+#endif
+
+  PersistentStorage stored;
+  ESP.rtcUserMemoryRead(32, (uint32_t *)&stored, sizeof(stored));
+  settimeofday(&stored.tv, NULL);
+
+  if (stored.magic != 0xbeef || time(nullptr) < 24 * 60 * 60) {
+    setupWIFI();
+    configTime(MY_TZ, MY_NTP_SERVER);
+    while (time(nullptr) < 24 * 60 * 60) {
+      delay(100);
+    }
+  }
+
+  pinMode(D1, OUTPUT);
+  digitalWrite(D1, HIGH);
   secondstripe.begin();
   minutestripe.begin();
   hourstripe.begin();
-
   secondstripe.setBrightness(BRIGHTNESS);
   minutestripe.setBrightness(BRIGHTNESS);
   hourstripe.setBrightness(BRIGHTNESS);
 
+  time_t now;
+  tm tm;
+  time(&now);
+  localtime_r(&now, &tm);
+  displayBCDClock(tm.tm_hour, tm.tm_min, tm.tm_sec);
 
 
-  secondstripe.clear();
-  minutestripe.clear();
-  hourstripe.clear();
-  Serial.begin(9600);
-  setupWIFI();
-  setupNTP();
+
+  stored.magic = 0xbeef;
+  gettimeofday(&stored.tv, NULL);
+  stored.tv.tv_sec++;
+  uint32_t sleep = 1000 * 1000 - stored.tv.tv_usec;
+  stored.tv.tv_usec = 0;
+  ESP.rtcUserMemoryWrite(32, (uint32_t *)&stored, sizeof(stored));
+
+#ifdef ENABLE_SERIAL
+  Serial.print("going to sleep for (us) ");
+  Serial.println(sleep);
+#endif
+  ESP.deepSleep(sleep, WAKE_RF_DISABLED);
 }
 
 void loop() {
-  currTime = millis();
-  if (currTime >= lastTimeUpdate + 10 * 60 * 1000) {
-    if (timeClient.update()) {
-      Serial.println("Got NTP Time!");
-    } else {
-      Serial.println("NTP not reachable");
-    }
-    lastTimeUpdate = currTime;
-    minutes = timeClient.getMinutes();
-    seconds = timeClient.getSeconds();
-     hours = timeClient.getHours();
-    lastCycleUpdate = currTime;
-
-    Serial.println(timeClient.getFormattedTime());
-  }
-  
-  if (currTime >= lastCycleUpdate + 1000) {
-    seconds++;
-    if (seconds == 60) {
-      seconds = 0;
-      minutes++;
-    }
-    if (minutes == 60) {
-      minutes = 0;
-      hours++;
-    }
-    if (hours == 24) {
-      hours = 0;
-    }
-
-    displayBCDClock(hours, minutes, seconds);
-
-    if (currTime >= lastCycleUpdate + 4000)
-      lastCycleUpdate = currTime;
-    else
-      lastCycleUpdate += 1000;
-  }
-  
-  uint32_t sleepDuration = (lastCycleUpdate + 1000) - currTime;
-  if(sleepDuration > 10) {
-    delay(sleepDuration - 10);
-  }
+  // this should never be reached
+  delay(1000);
 }
 
 void setupWIFI() { // Stellt eine Verbindung zum Wlan her
   WiFi.mode(WIFI_STA);
 
   WiFiManager wm;
-  
-  // TODO: die Einstellungen zurücksetzen, wenn hier beim Starten ein Knopf gedrückt wird
-  //wm.resetSettings();
-
-  // Normalerweise blockiert WiFiManager, bis wir verbunden sind, und nimmt uns so einiges an Code Arbeit ab.
-  // Jedoch wollen wir eine Animation beim Booten anzeigen, und benutzen daher Blocking = false, müssen dafür
-  // aber selbst wiederholt wm.process() ausführen, bis wir verbunden sind.
   wm.setConfigPortalBlocking(false);
   wm.autoConnect("BCD-UhrM");
 
@@ -257,22 +232,12 @@ void setupWIFI() { // Stellt eine Verbindung zum Wlan her
   }
 }
 
-void setupNTP() {  // Fragt mit einer bereits offenen WLAN Verbindung das erste mal nach der Zeit
-  timeClient.begin();
-  timeClient.setTimeOffset(7200);
-  timeClient.update();
-  hours = timeClient.getHours();
-  minutes = timeClient.getMinutes();
-  seconds = timeClient.getSeconds();
-  lastTimeUpdate = millis();
-}
-
-byte bcd_time=0;
+byte bcd_time = 0;
 void displayBCDClock(byte hour, byte minute, byte second) {
-  bcd_time += 5;
   displayBCDSegment(hour, hourstripe, 16);
   displayBCDSegment(minute, minutestripe, 8);
   displayBCDSegment(second, secondstripe, 0);
+  bcd_time += 5;
 }
 
 void displayBCDSegment(byte value, Adafruit_NeoPixel& display, byte animOffset) {
