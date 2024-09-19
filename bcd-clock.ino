@@ -161,6 +161,7 @@ Adafruit_NeoPixel hourstripe(PIXELCOUNTHOURS, HOURPIN, NEO_RGB + NEO_KHZ800);
 struct PersistentStorage {
   uint16_t magic;
   struct timeval tv;
+  byte animation_pos;
 };
 
 uint16_t getYear() {
@@ -189,6 +190,7 @@ void setup() {
 #endif
     setupWIFI();
     configTime(MY_TZ, MY_NTP_SERVER);
+    stored.animation_pos = 0;
 
     do {
       delay(100);
@@ -216,11 +218,12 @@ void setup() {
   tm tm;
   time(&now);
   localtime_r(&now, &tm);
-  displayBCDClock(tm.tm_hour, tm.tm_min, tm.tm_sec);
+  displayBCDClock(tm.tm_hour, tm.tm_min, tm.tm_sec, stored.animation_pos);
 
 
 
   stored.magic = 0xbeef;
+  stored.animation_pos += 5;
   gettimeofday(&stored.tv, NULL);
   stored.tv.tv_sec++;
   uint32_t sleep = 1000 * 1000 - stored.tv.tv_usec;
@@ -255,25 +258,23 @@ void setupWIFI() { // Stellt eine Verbindung zum Wlan her
   }
 }
 
-byte bcd_time = 0;
-void displayBCDClock(byte hour, byte minute, byte second) {
-  displayBCDSegment(hour, hourstripe, 16);
-  displayBCDSegment(minute, minutestripe, 8);
-  displayBCDSegment(second, secondstripe, 0);
-  bcd_time += 5;
+void displayBCDClock(byte hour, byte minute, byte second, byte animation_pos) {
+  displayBCDSegment(hour, animation_pos, hourstripe, 16);
+  displayBCDSegment(minute, animation_pos, minutestripe, 8);
+  displayBCDSegment(second, animation_pos, secondstripe, 0);
 }
 
-void displayBCDSegment(byte value, Adafruit_NeoPixel& display, byte animOffset) {
+void displayBCDSegment(byte value, byte animation_pos, Adafruit_NeoPixel& display, byte animOffset) {
   display.clear();
-  displayBCDLine(value % 10, display, 0, animOffset);
-  displayBCDLine(value / 10, display, 4, animOffset);
+  displayBCDLine(value % 10, animation_pos, display, 0, animOffset);
+  displayBCDLine(value / 10, animation_pos, display, 4, animOffset);
   display.show();
 }
 
-void displayBCDLine(byte value, Adafruit_NeoPixel& display, byte stripeOffset, byte animOffset) {
+void displayBCDLine(byte value, byte animation_pos, Adafruit_NeoPixel& display, byte stripeOffset, byte animOffset) {
     for(int i = 0; i < 4; i++) {
       if (value & (1 << i)) {
-        auto c = getColor((byte) bcd_time, animationData[i + animOffset], maskData[i + animOffset]);
+        auto c = getColor((byte) animation_pos, animationData[i + animOffset], maskData[i + animOffset]);
         display.setPixelColor(i + stripeOffset, c);
       }
     }
