@@ -10,7 +10,7 @@
 #define MINUTEPIN D7
 #define HOURPIN D8
 
-//#define ENABLE_SERIAL
+#define ENABLE_SERIAL
 
 // How many NeoPixels are attached to the Arduino?
 #define PIXELCOUNTSECONDS 7
@@ -163,6 +163,15 @@ struct PersistentStorage {
   struct timeval tv;
 };
 
+uint16_t getYear() {
+  time_t now;
+  tm tm;
+  time(&now);
+  localtime_r(&now, &tm);
+
+  return 1900 + tm.tm_year;
+}
+
 void setup() {
 #ifdef ENABLE_SERIAL
   Serial.begin(9600);
@@ -170,14 +179,28 @@ void setup() {
 
   PersistentStorage stored;
   ESP.rtcUserMemoryRead(32, (uint32_t *)&stored, sizeof(stored));
+  setTZ(MY_TZ);
   settimeofday(&stored.tv, NULL);
 
-  if (stored.magic != 0xbeef || time(nullptr) < 24 * 60 * 60) {
+  uint16_t year = getYear();
+  if (stored.magic != 0xbeef || year < 2000 || year > 2500) {
+#ifdef ENABLE_SERIAL
+    Serial.print("Cold reboot detected, waiting for NTP");
+#endif
     setupWIFI();
     configTime(MY_TZ, MY_NTP_SERVER);
-    while (time(nullptr) < 24 * 60 * 60) {
+
+    do {
       delay(100);
-    }
+      year = getYear();
+#ifdef ENABLE_SERIAL
+      Serial.print(".");
+#endif
+    } while(year < 2000 || year > 2500);
+
+#ifdef ENABLE_SERIAL
+    Serial.println();
+#endif
   }
 
   pinMode(D1, OUTPUT);
